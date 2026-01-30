@@ -1,353 +1,239 @@
 # ================================================
-# UV ENVIRONMENT MANAGER - v2.0 (Stable)
+# UV ENVIRONMENT MANAGER - v3.0 (Self-Installing)
 # ================================================
 
-# Global configuration using standardized paths
+# 1. BOOTSTRAP: Auto-Install UV if missing
+if (-not (Get-Command "uv" -ErrorAction SilentlyContinue)) {
+    Write-Warning "Atomic 'uv' tool is not installed."
+    $confirm = Read-Host "Do you want to install it now? (y/N)"
+    if ($confirm -eq 'y') {
+        Write-Host "Installing uv..." -ForegroundColor Cyan
+        try {
+            # Official install method for Windows
+            powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+            # Refresh env vars so we can use it immediately without restarting
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","User") + ";" + [System.Environment]::GetEnvironmentVariable("Path","Machine")
+        } catch {
+            Write-Error "Installation failed. Please install manually: 'pip install uv'"
+            return
+        }
+    } else {
+        Write-Error "UV is required for this script. Exiting."
+        return
+    }
+}
+
+# 2. CONFIGURATION
 $global:UV_ENVS_ROOT = Join-Path $HOME ".uv\envs"
 $global:UV_ENVS_FILE = Join-Path $global:UV_ENVS_ROOT "envs.json"
 
-# ================================================
-# INTERNAL HELPERS
-# ================================================
-
-function Test-CommandExists {
-    param([string]$Command)
-    return $null -ne (Get-Command $Command -ErrorAction SilentlyContinue)
-}
-
-# Database Access: Safe Loading
+# 3. INTERNAL HELPERS
 function Get-UvDb {
     if (-not (Test-Path $UV_ENVS_FILE)) { return @{} }
     try {
         $content = Get-Content $UV_ENVS_FILE -Raw -ErrorAction Stop
         if ([string]::IsNullOrWhiteSpace($content)) { return @{} }
         return $content | ConvertFrom-Json -AsHashtable
-    } catch {
-        Write-Warning "Could not parse environment database. Starting fresh."
-        return @{}
-    }
+    } catch { return @{} }
 }
 
-# Database Access: Safe Saving (Fixes JSON Depth & Encoding bugs)
 function Set-UvDb {
     param($Data)
     try {
-        # Depth 10 prevents corruption of nested objects
-        $json = $Data | ConvertTo-Json -Depth 10 
-        $json | Set-Content -Path $UV_ENVS_FILE -Encoding UTF8
-    } catch {
-        Write-Error "Failed to save environment database: $_"
-    }
-}
-
-# Helper: Get Python executable path within an environment
-function Get-EnvPython {
-    param($EnvPath)
-    # Windows specific path
-    return Join-Path $EnvPath "Scripts\python.exe"
-}
-
-# Initialization checks
-if (-not (Test-CommandExists "uv")) {
-    Write-Warning "ERROR: 'uv' is not found in PATH."
-    return
-}
-
-if (-not (Test-Path $UV_ENVS_ROOT)) {
-    New-Item -ItemType Directory -Path $UV_ENVS_ROOT -Force | Out-Null
-}
-
-if (-not (Test-Path $UV_ENVS_FILE)) {
-    Set-UvDb @{}
+        if (-not (Test-Path $UV_ENVS_ROOT)) { New-Item -ItemType Directory -Path $UV_ENVS_ROOT -Force | Out-Null }
+        $Data | ConvertTo-Json -Depth 10 | Set-Content -Path $UV_ENVS_FILE -Encoding UTF8
+    } catch { Write-Error "DB Save Failed: $_" }
 }
 
 # ================================================
-# CORE FUNCTIONS
+# CORE FUNCTIONS (Now with Approved Verbs)
 # ================================================
 
-function uv-env-list {
+function Get-UvEnvList {
     <#
     .SYNOPSIS
-    List all registered environments with health status.
+        Lists all managed UV environments.
+    .DESCRIPTION
+        Reads the local JSON registry and checks if environments exist on disk.
+        Marks active environment with an asterisk (*).
+    .EXAMPLE
+        uvl
     #>
+    [CmdletBinding()]
+    param()
+
     $envs = Get-UvDb
-    
-    if ($envs.Count -eq 0) {
-        Write-Host "No environments managed." -ForegroundColor Yellow
-        return
-    }
+    if ($envs.Count -eq 0) { Write-Host "No environments found." -ForegroundColor Yellow; return }
 
     Write-Host "`nUV Environments:" -ForegroundColor Cyan
     Write-Host "----------------" -ForegroundColor Cyan
     
-    # Sort by name
     $envs.Keys | Sort-Object | ForEach-Object {
         $name = $_
         $info = $envs[$name]
-        $path = $info.path
-        
-        # Check 1: Is it active?
-        $isActive = ($env:VIRTUAL_ENV -and ($env:VIRTUAL_ENV -eq $path))
+        $isActive = ($env:VIRTUAL_ENV -and ($env:VIRTUAL_ENV -eq $info.path))
         $marker = if ($isActive) { "*" } else { " " }
         
-        # Check 2: Does the folder actually exist? (Zombie check)
-        $status = if (Test-Path $path) { 
-            "$($info.python)" 
-        } else { 
-            "[MISSING/BROKEN]" 
-        }
-        $statusColor = if ($status -match "MISSING") { "Red" } else { "Gray" }
+        $status = if (Test-Path $info.path) { "$($info.python)" } else { "[MISSING]" }
+        $color = if ($status -eq "[MISSING]") { "Red" } else { "Gray" }
 
         Write-Host "$marker $name " -NoNewline -ForegroundColor Yellow
-        Write-Host "($status)" -ForegroundColor $statusColor
-        Write-Host "    $path" -ForegroundColor DarkGray
+        Write-Host "($status)" -ForegroundColor $color
+        Write-Host "    $($info.path)" -ForegroundColor DarkGray
     }
     Write-Host ""
 }
 
-function uv-env-create {
+function New-UvEnv {
     <#
     .SYNOPSIS
-    Create a new environment and register it.
+        Creates a new UV environment.
+    .DESCRIPTION
+        Creates a venv and registers it in the JSON database.
+        If python version is 'default', uv uses system python or downloads a managed one.
+    .EXAMPLE
+        uvc myapp            (Uses default python)
+        uvc myapp 3.11       (Downloads/Uses Python 3.11)
     #>
+    [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true, Position=0)] [string]$Name,
         [Parameter(Position=1)] [string]$Python = "default",
         [string]$Path
     )
-    
-    # Reload DB to prevent race conditions
+
     $envs = Get-UvDb
-    
-    if ($envs.ContainsKey($Name)) {
-        Write-Host "Error: Environment '$Name' already exists in registry." -ForegroundColor Red
-        return
-    }
-    
-    # Determine path
+    if ($envs.ContainsKey($Name)) { Write-Error "Environment '$Name' already registered."; return }
+
     $targetPath = if ($Path) { $Path } else { Join-Path $UV_ENVS_ROOT $Name }
     
-    Write-Host "Creating '$Name' (Python $Python) at $targetPath..." -ForegroundColor Cyan
+    # Logic: If user specifically asks for 'default', we pass nothing to --python 
+    # to let UV decide (System > Managed). If they specify version, we pass it.
+    $uvArgs = @("venv", $targetPath)
+    if ($Python -ne "default") {
+        $uvArgs += "--python"
+        $uvArgs += $Python
+    }
+
+    Write-Host "Creating '$Name' (Python: $Python)..." -ForegroundColor Cyan
     
-    # Run UV
-    uv venv --python $Python $targetPath
-    
-    # ONLY register if UV succeeded
+    # Run UV command
+    & uv $uvArgs
+
     if ($LASTEXITCODE -eq 0) {
-        $envs[$Name] = @{
-            path = $targetPath
-            python = $Python
-            created = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
-        }
+        $envs[$Name] = @{ path = $targetPath; python = $Python; created = (Get-Date).ToString("s") }
         Set-UvDb $envs
-        Write-Host "Environment created successfully." -ForegroundColor Green
-        Write-Host "Activate with: uva $Name" -ForegroundColor Gray
+        Write-Host "Created. Activate with: uva $Name" -ForegroundColor Green
     } else {
-        Write-Host "Failed to create environment. DB not updated." -ForegroundColor Red
+        Write-Error "UV creation failed."
     }
 }
 
-function uv-env-activate {
+function Enter-UvEnv {
     <#
     .SYNOPSIS
-    Safely activates an environment in the current shell.
+        Activates a specific environment.
+    .EXAMPLE
+        uva myapp
     #>
-    param(
-        [Parameter(Mandatory=$true, Position=0)] [string]$Name
-    )
-    
-    $envs = Get-UvDb
-    
-    if (-not $envs.ContainsKey($Name)) {
-        Write-Host "Unknown environment: '$Name'" -ForegroundColor Red
-        return
-    }
-    
-    $path = $envs[$Name].path
-    $activateScript = Join-Path $path "Scripts\Activate.ps1"
-    
-    if (-not (Test-Path $activateScript)) {
-        Write-Host "Activation script not found at:" -ForegroundColor Red
-        Write-Host $activateScript -ForegroundColor Gray
-        Write-Host "The environment folder might have been deleted." -ForegroundColor Yellow
-        return
-    }
-    
-    # 1. Safe Deactivation
-    if (Test-CommandExists "deactivate") {
-        deactivate
-    }
-    
-    # 2. Activation
-    try {
-        . $activateScript
-        Write-Host "Activated $Name" -ForegroundColor Green
-    } catch {
-        Write-Host "Failed to activate environment." -ForegroundColor Red
-        Write-Error $_
-    }
-}
-
-function uv-env-remove {
-    <#
-    .SYNOPSIS
-    Removes environment folder and registry entry.
-    #>
+    [CmdletBinding()]
     param([Parameter(Mandatory=$true, Position=0)] [string]$Name)
-    
+
     $envs = Get-UvDb
-    if (-not $envs.ContainsKey($Name)) {
-        Write-Host "Environment '$Name' not found." -ForegroundColor Red
+    if (-not $envs.ContainsKey($Name)) { Write-Error "Env '$Name' not found."; return }
+    
+    $script = Join-Path $envs[$Name].path "Scripts\Activate.ps1"
+    
+    if (Test-Path $script) {
+        if (Get-Command "deactivate" -ErrorAction SilentlyContinue) { deactivate }
+        . $script
+        Write-Host "Activated $Name" -ForegroundColor Green
+    } else {
+        Write-Error "Activation script missing at $script"
+    }
+}
+
+function Remove-UvEnv {
+    <#
+    .SYNOPSIS
+        Deletes an environment from disk and registry.
+    #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory=$true, Position=0)] [string]$Name)
+
+    $envs = Get-UvDb
+    if (-not $envs.ContainsKey($Name)) { Write-Error "Env '$Name' not found."; return }
+    
+    if ($env:VIRTUAL_ENV -eq $envs[$Name].path) {
+        Write-Warning "Please deactivate (uvx) before removing the active environment."
         return
     }
-    
-    $path = $envs[$Name].path
-    
-    # Prevent deleting current environment while inside it
-    if ($env:VIRTUAL_ENV -eq $path) {
-        Write-Host "Error: You are currently active in '$Name'." -ForegroundColor Red
-        Write-Host "Please deactivate (uvx) before removing it." -ForegroundColor Yellow
-        return
-    }
-    
-    $confirm = Read-Host "Are you sure you want to delete '$Name'? (y/N)"
-    if ($confirm -eq 'y') {
-        # Physical delete
-        if (Test-Path $path) {
-            Remove-Item -Path $path -Recurse -Force -ErrorAction Stop
-        } else {
-            Write-Warning "Folder was already missing, cleaning up registry..."
-        }
-        
-        # Registry delete
+
+    if ((Read-Host "Delete '$Name'? (y/N)") -eq 'y') {
+        if (Test-Path $envs[$Name].path) { Remove-Item $envs[$Name].path -Recurse -Force -ErrorAction Stop }
         $envs.Remove($Name)
         Set-UvDb $envs
-        Write-Host "Environment '$Name' removed." -ForegroundColor Green
+        Write-Host "Removed." -ForegroundColor Green
     }
 }
 
-function uv-env-update {
+function Update-UvEnv {
     <#
     .SYNOPSIS
-    Updates packages without needing activation (Side-effect free).
+        Updates packages in an environment.
     #>
+    [CmdletBinding()]
     param([string]$Name)
     
-    # Determine target environment
-    if ($Name) {
-        $envs = Get-UvDb
-        if (-not $envs.ContainsKey($Name)) { Write-Error "Env '$Name' not found"; return }
-        $path = $envs[$Name].path
-    } elseif ($env:VIRTUAL_ENV) {
-        $path = $env:VIRTUAL_ENV
-    } else {
-        Write-Host "No environment specified or active." -ForegroundColor Red
-        return
-    }
+    $targetPath = if ($Name) { (Get-UvDb).$Name.path } else { $env:VIRTUAL_ENV }
+    if (-not $targetPath) { Write-Error "No environment specified."; return }
     
-    $pythonExe = Get-EnvPython $path
-    if (-not (Test-Path $pythonExe)) { Write-Error "Python not found in $path"; return }
-
-    Write-Host "Checking for updates in $path..." -ForegroundColor Cyan
+    $py = Join-Path $targetPath "Scripts\python.exe"
     
-    # Use JSON output for robust parsing (Fixes text parsing bug)
-    $outdatedRaw = & uv pip list --python $pythonExe --outdated --format=json
-    
+    Write-Host "Scanning updates..." -ForegroundColor Cyan
     try {
-        $outdated = $outdatedRaw | ConvertFrom-Json
-    } catch {
-        # If output is empty or not json, assume up to date or error
-        $outdated = $null
-    }
-
-    if ($outdated) {
-        foreach ($pkg in $outdated) {
-            Write-Host "Updating $($pkg.name) ($($pkg.version) -> $($pkg.latest_version))..." -ForegroundColor Gray
-            & uv pip install --python $pythonExe --upgrade $pkg.name
+        $json = & uv pip list --python $py --outdated --format=json | ConvertFrom-Json
+        foreach ($pkg in $json) {
+            Write-Host "Updating $($pkg.name)..."
+            & uv pip install --python $py --upgrade $pkg.name
         }
-        Write-Host "Update complete." -ForegroundColor Green
-    } else {
-        Write-Host "All packages are up to date." -ForegroundColor Green
+        if (-not $json) { Write-Host "Everything is up to date." -ForegroundColor Green }
+    } catch {
+        Write-Host "Check completed (No updates found or error parsing)." -ForegroundColor Gray
     }
 }
 
-function uv-env-export {
+function Export-UvEnv {
     <#
     .SYNOPSIS
-    Exports requirements.txt without switching contexts.
+        Exports requirements.txt.
     #>
-    param(
-        [string]$Name,
-        [string]$Output = "requirements.txt"
-    )
+    [CmdletBinding()]
+    param([string]$Name, [string]$Output="requirements.txt")
     
-    if ($Name) {
-        $envs = Get-UvDb
-        if (-not $envs.ContainsKey($Name)) { Write-Error "Env '$Name' not found"; return }
-        $path = $envs[$Name].path
-    } elseif ($env:VIRTUAL_ENV) {
-        $path = $env:VIRTUAL_ENV
-    } else {
-        Write-Host "No environment specified or active." -ForegroundColor Red
-        return
-    }
-    
-    $pythonExe = Get-EnvPython $path
-    
-    if (Test-Path $pythonExe) {
-        Write-Host "Exporting packages..." -ForegroundColor Cyan
-        & uv pip freeze --python $pythonExe | Out-File -FilePath $Output -Encoding UTF8
-        Write-Host "Saved to $Output" -ForegroundColor Green
-    }
+    $targetPath = if ($Name) { (Get-UvDb).$Name.path } else { $env:VIRTUAL_ENV }
+    if (-not $targetPath) { Write-Error "No environment specified."; return }
+
+    $py = Join-Path $targetPath "Scripts\python.exe"
+    & uv pip freeze --python $py | Out-File -FilePath $Output -Encoding UTF8
+    Write-Host "Exported to $Output" -ForegroundColor Green
 }
 
-function uv-env-info {
-    param([string]$Name)
-    
-    if ($Name) {
-        $envs = Get-UvDb
-        if (-not $envs.ContainsKey($Name)) { Write-Error "Env not found"; return }
-        $path = $envs[$Name].path
-        $python = $envs[$Name].python
-    } elseif ($env:VIRTUAL_ENV) {
-        $path = $env:VIRTUAL_ENV
-        $python = "Current"
-    } else {
-        Write-Host "No active environment." -ForegroundColor Yellow
-        return
-    }
-    
-    Write-Host "Info for: $path" -ForegroundColor Cyan
-    Write-Host "Python Base: $python" -ForegroundColor Gray
-    
-    $pythonExe = Get-EnvPython $path
-    if (Test-Path $pythonExe) {
-        Write-Host "`nInstalled Packages:" -ForegroundColor Cyan
-        & uv pip list --python $pythonExe
-    }
+function Exit-UvEnv {
+    if (Get-Command "deactivate" -ErrorAction SilentlyContinue) { deactivate }
+    else { Write-Host "Not in a virtual environment." -ForegroundColor Gray }
 }
 
 # ================================================
-# ALIASES & EXPORT
+# ALIASES
 # ================================================
+Set-Alias uvl Get-UvEnvList
+Set-Alias uvc New-UvEnv
+Set-Alias uva Enter-UvEnv
+Set-Alias uvr Remove-UvEnv
+Set-Alias uve Export-UvEnv
+Set-Alias uvu Update-UvEnv
+Set-Alias uvx Exit-UvEnv
 
-# Safe wrapper for deactivate
-function uv-safe-deactivate {
-    if (Test-CommandExists "deactivate") {
-        deactivate
-    } else {
-        Write-Host "No active environment." -ForegroundColor Gray
-    }
-}
-
-Set-Alias uvl uv-env-list
-Set-Alias uvc uv-env-create
-Set-Alias uva uv-env-activate
-Set-Alias uvr uv-env-remove
-Set-Alias uve uv-env-export
-Set-Alias uvi uv-env-info
-Set-Alias uvu uv-env-update
-Set-Alias uvx uv-safe-deactivate
-
-Write-Host "UV Manager v2.0 loaded." -ForegroundColor Green
-Write-Host "Use 'uvl' to list environments." -ForegroundColor Gray
+Write-Host "UV Manager v3.0 Loaded." -ForegroundColor Green
+Write-Host "Help: Get-Help uvl -Full" -ForegroundColor Gray
