@@ -1,5 +1,5 @@
 # ================================================
-# UV ENVIRONMENT MANAGER - v3.1 (Gold)
+# UV ENVIRONMENT MANAGER - v3.2
 # ================================================
 
 # 1. BOOTSTRAP: Auto-Install UV if missing
@@ -11,7 +11,7 @@ if (-not (Get-Command "uv" -ErrorAction SilentlyContinue)) {
         try {
             # Official install method for Windows
             powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-            # Attempt to refresh env vars for current session
+            # Refresh env vars for current session
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path","User") + ";" + [System.Environment]::GetEnvironmentVariable("Path","Machine")
         } catch {
             Write-Error "Installation failed. Please install manually: 'pip install uv'"
@@ -28,9 +28,9 @@ $global:UV_ENVS_FILE = Join-Path $global:UV_ENVS_ROOT "envs.json"
 
 # 3. INTERNAL HELPERS
 function Get-UvDb {
-    if (-not (Test-Path $UV_ENVS_FILE)) { return @{} }
+    if (-not (Test-Path $global:UV_ENVS_FILE)) { return @{} }
     try {
-        $content = Get-Content $UV_ENVS_FILE -Raw -ErrorAction Stop
+        $content = Get-Content $global:UV_ENVS_FILE -Raw -ErrorAction Stop
         if ([string]::IsNullOrWhiteSpace($content)) { return @{} }
         return $content | ConvertFrom-Json -AsHashtable
     } catch { return @{} }
@@ -39,8 +39,8 @@ function Get-UvDb {
 function Set-UvDb {
     param($Data)
     try {
-        if (-not (Test-Path $UV_ENVS_ROOT)) { New-Item -ItemType Directory -Path $UV_ENVS_ROOT -Force | Out-Null }
-        $Data | ConvertTo-Json -Depth 10 | Set-Content -Path $UV_ENVS_FILE -Encoding UTF8
+        if (-not (Test-Path $global:UV_ENVS_ROOT)) { New-Item -ItemType Directory -Path $global:UV_ENVS_ROOT -Force | Out-Null }
+        $Data | ConvertTo-Json -Depth 10 | Set-Content -Path $global:UV_ENVS_FILE -Encoding UTF8
     } catch { Write-Error "DB Save Failed: $_" }
 }
 
@@ -49,32 +49,24 @@ function Set-UvDb {
 # ================================================
 
 function Get-UvEnvList {
-    <#
-    .SYNOPSIS
-        Lists environments. Use -Prune to clean up deleted folders from DB.
-    #>
     [CmdletBinding()]
     param([switch]$Prune)
 
     $envs = Get-UvDb
     if ($envs.Count -eq 0) { Write-Host "No environments managed." -ForegroundColor Yellow; return }
 
-    # PASS 1: Pruning Logic (Separate from display to avoid errors)
+    # PASS 1: Pruning Logic
     if ($Prune) {
         $toRemove = @()
         foreach ($key in $envs.Keys) {
-            if (-not (Test-Path $envs[$key].path)) {
-                $toRemove += $key
-            }
+            if (-not (Test-Path $envs[$key].path)) { $toRemove += $key }
         }
-
         if ($toRemove.Count -gt 0) {
             foreach ($key in $toRemove) {
                 Write-Host "  [PRUNING] $key (Folder missing)" -ForegroundColor Red
                 $envs.Remove($key)
             }
             Set-UvDb $envs
-            Write-Host "Registry pruned.`n" -ForegroundColor Green
         }
     }
 
@@ -86,8 +78,6 @@ function Get-UvEnvList {
         $name = $_
         $info = $envs[$name]
         $isActive = ($env:VIRTUAL_ENV -and ($env:VIRTUAL_ENV -eq $info.path))
-        
-        # Check existence only for display purposes now
         $exists = Test-Path $info.path
         
         $marker = if ($isActive) { "*" } else { " " }
@@ -102,10 +92,6 @@ function Get-UvEnvList {
 }
 
 function New-UvEnv {
-    <#
-    .SYNOPSIS
-        Creates a new UV environment.
-    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory=$true, Position=0)] [string]$Name,
@@ -116,26 +102,20 @@ function New-UvEnv {
     $envs = Get-UvDb
     if ($envs.ContainsKey($Name)) { Write-Error "Environment '$Name' already registered."; return }
 
-    $targetPath = if ($Path) { $Path } else { Join-Path $UV_ENVS_ROOT $Name }
+    $targetPath = if ($Path) { $Path } else { Join-Path $global:UV_ENVS_ROOT $Name }
     
     # Construct UV arguments
     $uvArgs = @("venv", $targetPath)
-    if ($Python -ne "default") {
-        $uvArgs += "--python"
-        $uvArgs += $Python
-    }
+    if ($Python -ne "default") { $uvArgs += "--python"; $uvArgs += $Python }
 
     Write-Host "Creating '$Name' (Python: $Python)..." -ForegroundColor Cyan
-    
     & uv $uvArgs
 
     if ($LASTEXITCODE -eq 0) {
         $envs[$Name] = @{ path = $targetPath; python = $Python; created = (Get-Date).ToString("s") }
         Set-UvDb $envs
         Write-Host "Created. Activate with: uva $Name" -ForegroundColor Green
-    } else {
-        Write-Error "UV creation failed."
-    }
+    } else { Write-Error "UV creation failed." }
 }
 
 function Enter-UvEnv {
@@ -151,9 +131,7 @@ function Enter-UvEnv {
         if (Get-Command "deactivate" -ErrorAction SilentlyContinue) { deactivate }
         . $script
         Write-Host "Activated $Name" -ForegroundColor Green
-    } else {
-        Write-Error "Activation script missing. Try 'uvl -Prune' to clean up."
-    }
+    } else { Write-Error "Activation script missing. Try 'uvl -Prune' to clean up." }
 }
 
 function Remove-UvEnv {
@@ -179,7 +157,6 @@ function Remove-UvEnv {
 function Update-UvEnv {
     [CmdletBinding()]
     param([string]$Name)
-    
     $targetPath = if ($Name) { (Get-UvDb).$Name.path } else { $env:VIRTUAL_ENV }
     if (-not $targetPath) { Write-Error "No environment specified."; return }
     
@@ -188,22 +165,18 @@ function Update-UvEnv {
 
     Write-Host "Scanning updates..." -ForegroundColor Cyan
     try {
-        # Safe JSON parsing
         $json = & uv pip list --python $py --outdated --format=json | ConvertFrom-Json
         foreach ($pkg in $json) {
             Write-Host "Updating $($pkg.name)..."
             & uv pip install --python $py --upgrade $pkg.name
         }
         if (-not $json) { Write-Host "Everything is up to date." -ForegroundColor Green }
-    } catch {
-        Write-Host "Check completed." -ForegroundColor Gray
-    }
+    } catch { Write-Host "Check completed." -ForegroundColor Gray }
 }
 
 function Export-UvEnv {
     [CmdletBinding()]
     param([string]$Name, [string]$Output="requirements.txt")
-    
     $targetPath = if ($Name) { (Get-UvDb).$Name.path } else { $env:VIRTUAL_ENV }
     if (-not $targetPath) { Write-Error "No environment specified."; return }
 
@@ -218,19 +191,13 @@ function Exit-UvEnv {
 }
 
 function Clear-UvCache {
-    <#
-    .SYNOPSIS
-    Cleans UV's global cache to free up disk space.
-    #>
-    [CmdletBinding()]
-    param()
     Write-Host "Cleaning UV global cache..." -ForegroundColor Cyan
     & uv cache clean
-    Write-Host "Cache cleared. Disk space reclaimed." -ForegroundColor Green
+    Write-Host "Cache cleared." -ForegroundColor Green
 }
 
 # ================================================
-# ALIASES
+# ALIASES & COMPLETION
 # ================================================
 Set-Alias uvl Get-UvEnvList
 Set-Alias uvc New-UvEnv
@@ -239,7 +206,14 @@ Set-Alias uvr Remove-UvEnv
 Set-Alias uve Export-UvEnv
 Set-Alias uvu Update-UvEnv
 Set-Alias uvx Exit-UvEnv
-Set-Alias uvk Clear-UvCache  # "Kill" Cache
+Set-Alias uvk Clear-UvCache
 
-Write-Host "UV Manager v3.1 Loaded." -ForegroundColor Green
-Write-Host "Run 'uvl' to list, 'uvk' to free space." -ForegroundColor Gray
+# Register Tab Completion for 'uva' (Enter-UvEnv) and 'uvr' (Remove-UvEnv)
+$completionBlock = {
+    param($commandName, $parameterName, $wordToComplete, $commandAst, $fakeBoundParameters)
+    $envs = Get-UvDb
+    $envs.Keys | Where-Object { $_ -like "$wordToComplete*" }
+}
+Register-ArgumentCompleter -CommandName "uva","Enter-UvEnv","uvr","Remove-UvEnv" -ScriptBlock $completionBlock
+
+Write-Host "UV Manager v3.2 Loaded." -ForegroundColor Green
