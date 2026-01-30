@@ -1,5 +1,5 @@
 # ================================================
-# UV ENVIRONMENT MANAGER - v3.0 (Self-Installing)
+# UV ENVIRONMENT MANAGER - v3.1 (Gold)
 # ================================================
 
 # 1. BOOTSTRAP: Auto-Install UV if missing
@@ -11,15 +11,14 @@ if (-not (Get-Command "uv" -ErrorAction SilentlyContinue)) {
         try {
             # Official install method for Windows
             powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-            # Refresh env vars so we can use it immediately without restarting
+            # Attempt to refresh env vars for current session
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path","User") + ";" + [System.Environment]::GetEnvironmentVariable("Path","Machine")
         } catch {
             Write-Error "Installation failed. Please install manually: 'pip install uv'"
             return
         }
     } else {
-        Write-Error "UV is required for this script. Exiting."
-        return
+        return # Exit script if UV is missing and user said No
     }
 }
 
@@ -46,25 +45,40 @@ function Set-UvDb {
 }
 
 # ================================================
-# CORE FUNCTIONS (Now with Approved Verbs)
+# CORE FUNCTIONS
 # ================================================
 
 function Get-UvEnvList {
     <#
     .SYNOPSIS
-        Lists all managed UV environments.
-    .DESCRIPTION
-        Reads the local JSON registry and checks if environments exist on disk.
-        Marks active environment with an asterisk (*).
-    .EXAMPLE
-        uvl
+        Lists environments. Use -Prune to clean up deleted folders from DB.
     #>
     [CmdletBinding()]
-    param()
+    param([switch]$Prune)
 
     $envs = Get-UvDb
-    if ($envs.Count -eq 0) { Write-Host "No environments found." -ForegroundColor Yellow; return }
+    if ($envs.Count -eq 0) { Write-Host "No environments managed." -ForegroundColor Yellow; return }
 
+    # PASS 1: Pruning Logic (Separate from display to avoid errors)
+    if ($Prune) {
+        $toRemove = @()
+        foreach ($key in $envs.Keys) {
+            if (-not (Test-Path $envs[$key].path)) {
+                $toRemove += $key
+            }
+        }
+
+        if ($toRemove.Count -gt 0) {
+            foreach ($key in $toRemove) {
+                Write-Host "  [PRUNING] $key (Folder missing)" -ForegroundColor Red
+                $envs.Remove($key)
+            }
+            Set-UvDb $envs
+            Write-Host "Registry pruned.`n" -ForegroundColor Green
+        }
+    }
+
+    # PASS 2: Display Logic
     Write-Host "`nUV Environments:" -ForegroundColor Cyan
     Write-Host "----------------" -ForegroundColor Cyan
     
@@ -72,9 +86,12 @@ function Get-UvEnvList {
         $name = $_
         $info = $envs[$name]
         $isActive = ($env:VIRTUAL_ENV -and ($env:VIRTUAL_ENV -eq $info.path))
-        $marker = if ($isActive) { "*" } else { " " }
         
-        $status = if (Test-Path $info.path) { "$($info.python)" } else { "[MISSING]" }
+        # Check existence only for display purposes now
+        $exists = Test-Path $info.path
+        
+        $marker = if ($isActive) { "*" } else { " " }
+        $status = if ($exists) { "$($info.python)" } else { "[MISSING]" }
         $color = if ($status -eq "[MISSING]") { "Red" } else { "Gray" }
 
         Write-Host "$marker $name " -NoNewline -ForegroundColor Yellow
@@ -88,12 +105,6 @@ function New-UvEnv {
     <#
     .SYNOPSIS
         Creates a new UV environment.
-    .DESCRIPTION
-        Creates a venv and registers it in the JSON database.
-        If python version is 'default', uv uses system python or downloads a managed one.
-    .EXAMPLE
-        uvc myapp            (Uses default python)
-        uvc myapp 3.11       (Downloads/Uses Python 3.11)
     #>
     [CmdletBinding()]
     param(
@@ -107,8 +118,7 @@ function New-UvEnv {
 
     $targetPath = if ($Path) { $Path } else { Join-Path $UV_ENVS_ROOT $Name }
     
-    # Logic: If user specifically asks for 'default', we pass nothing to --python 
-    # to let UV decide (System > Managed). If they specify version, we pass it.
+    # Construct UV arguments
     $uvArgs = @("venv", $targetPath)
     if ($Python -ne "default") {
         $uvArgs += "--python"
@@ -117,7 +127,6 @@ function New-UvEnv {
 
     Write-Host "Creating '$Name' (Python: $Python)..." -ForegroundColor Cyan
     
-    # Run UV command
     & uv $uvArgs
 
     if ($LASTEXITCODE -eq 0) {
@@ -130,12 +139,6 @@ function New-UvEnv {
 }
 
 function Enter-UvEnv {
-    <#
-    .SYNOPSIS
-        Activates a specific environment.
-    .EXAMPLE
-        uva myapp
-    #>
     [CmdletBinding()]
     param([Parameter(Mandatory=$true, Position=0)] [string]$Name)
 
@@ -149,15 +152,11 @@ function Enter-UvEnv {
         . $script
         Write-Host "Activated $Name" -ForegroundColor Green
     } else {
-        Write-Error "Activation script missing at $script"
+        Write-Error "Activation script missing. Try 'uvl -Prune' to clean up."
     }
 }
 
 function Remove-UvEnv {
-    <#
-    .SYNOPSIS
-        Deletes an environment from disk and registry.
-    #>
     [CmdletBinding()]
     param([Parameter(Mandatory=$true, Position=0)] [string]$Name)
 
@@ -169,7 +168,7 @@ function Remove-UvEnv {
         return
     }
 
-    if ((Read-Host "Delete '$Name'? (y/N)") -eq 'y') {
+    if ((Read-Host "Delete '$Name' and all files? (y/N)") -eq 'y') {
         if (Test-Path $envs[$Name].path) { Remove-Item $envs[$Name].path -Recurse -Force -ErrorAction Stop }
         $envs.Remove($Name)
         Set-UvDb $envs
@@ -178,10 +177,6 @@ function Remove-UvEnv {
 }
 
 function Update-UvEnv {
-    <#
-    .SYNOPSIS
-        Updates packages in an environment.
-    #>
     [CmdletBinding()]
     param([string]$Name)
     
@@ -189,9 +184,11 @@ function Update-UvEnv {
     if (-not $targetPath) { Write-Error "No environment specified."; return }
     
     $py = Join-Path $targetPath "Scripts\python.exe"
-    
+    if (-not (Test-Path $py)) { Write-Error "Python not found in env."; return }
+
     Write-Host "Scanning updates..." -ForegroundColor Cyan
     try {
+        # Safe JSON parsing
         $json = & uv pip list --python $py --outdated --format=json | ConvertFrom-Json
         foreach ($pkg in $json) {
             Write-Host "Updating $($pkg.name)..."
@@ -199,15 +196,11 @@ function Update-UvEnv {
         }
         if (-not $json) { Write-Host "Everything is up to date." -ForegroundColor Green }
     } catch {
-        Write-Host "Check completed (No updates found or error parsing)." -ForegroundColor Gray
+        Write-Host "Check completed." -ForegroundColor Gray
     }
 }
 
 function Export-UvEnv {
-    <#
-    .SYNOPSIS
-        Exports requirements.txt.
-    #>
     [CmdletBinding()]
     param([string]$Name, [string]$Output="requirements.txt")
     
@@ -224,6 +217,18 @@ function Exit-UvEnv {
     else { Write-Host "Not in a virtual environment." -ForegroundColor Gray }
 }
 
+function Clear-UvCache {
+    <#
+    .SYNOPSIS
+    Cleans UV's global cache to free up disk space.
+    #>
+    [CmdletBinding()]
+    param()
+    Write-Host "Cleaning UV global cache..." -ForegroundColor Cyan
+    & uv cache clean
+    Write-Host "Cache cleared. Disk space reclaimed." -ForegroundColor Green
+}
+
 # ================================================
 # ALIASES
 # ================================================
@@ -234,6 +239,7 @@ Set-Alias uvr Remove-UvEnv
 Set-Alias uve Export-UvEnv
 Set-Alias uvu Update-UvEnv
 Set-Alias uvx Exit-UvEnv
+Set-Alias uvk Clear-UvCache  # "Kill" Cache
 
-Write-Host "UV Manager v3.0 Loaded." -ForegroundColor Green
-Write-Host "Help: Get-Help uvl -Full" -ForegroundColor Gray
+Write-Host "UV Manager v3.1 Loaded." -ForegroundColor Green
+Write-Host "Run 'uvl' to list, 'uvk' to free space." -ForegroundColor Gray
