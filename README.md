@@ -1,323 +1,146 @@
-# ⚡ UV Environment Manager
+# ⚡ UV Environment Manager (v3.2)
 
-![PowerShell](https://img.shields.io/badge/PowerShell-7+-5391FE?style=for-the-badge&logo=powershell&logoColor=white)
-![Cross-Platform](https://img.shields.io/badge/Cross--Platform-✓-green?style=for-the-badge)
+![PowerShell](https://img.shields.io/badge/PowerShell-7.2+-5391FE?style=for-the-badge&logo=powershell&logoColor=white)
+![Bash/Zsh](https://img.shields.io/badge/Shell-Bash%20%7C%20Zsh-4EAA25?style=for-the-badge&logo=gnu-bash&logoColor=white)
+![Cross-Platform](https://img.shields.io/badge/Platform-Win%20%7C%20macOS%20%7C%20Linux-lightgrey?style=for-the-badge)
 ![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)
-![UV](https://img.shields.io/badge/UV-Powered-FF6C37?style=for-the-badge)
 
-> **The ultimate environment manager** - Combining UV's speed with Conda's convenience
+> **Conda-like convenience, UV-level speed.**  
+> A centralized management system for your Python environments. No more searching for hidden `.venv` folders—manage everything from one place with global aliases.
 
-A powerful, cross-platform environment management system that brings Micromamba-like ease to UV-powered Python environments. Activate environments from anywhere, manage centrally, and enjoy lightning-fast package installation.
+---
 
 ## ✨ Features
 
-### 🚀 **Core Features**
-- **Centralized Management**: All environments in one place (`~/.uv/envs/`)
-- **One-Command Activation**: `uva ai` from anywhere
-- **Cross-Platform**: Works on Windows, macOS, and Linux
-- **Automatic Detection**: Auto-activate environments when entering project directories
-- **Template System**: Pre-configured environments for data science, web dev, ML, etc.
+- 🗃️ **Centralized Registry**: Tracks all environments in `~/.uv/envs/envs.json`.
+- 🚀 **Lightning Fast**: Powered by [Astral's UV](https://github.com/astral-sh/uv), the fastest Python package manager.
+- 🌍 **Unified Aliases**: Identical commands across Windows (CMD/PS) and Unix (Bash/Zsh).
+- 🔍 **Tab Completion**: Intelligent environment name completion for PowerShell users.
+- 🧹 **Health Checks**: Built-in pruning to remove broken or deleted environment references.
+- 📦 **One-Touch Updates**: Batch update all outdated packages in an environment with one command.
 
-### 🔧 **Advanced Features**
-- **Environment Cloning**: Duplicate environments with all packages
-- **Package Export/Import**: Share environment configurations
-- **Batch Operations**: Update all packages across environments
-- **Cache Management**: Intelligent reuse of compiled packages
-- **Registry Integration**: Tracks all environments in a central registry
+---
 
 ## 📦 Installation
 
+Choose the installer for your operating system:
+
 ### **Windows (PowerShell)**
-
 ```powershell
-# One-line install (recommended)
-irm https://raw.githubusercontent.com/superchargez/power_shelling/main/setup-uv.ps1 | iex
-
-# Or download and run
-.\install-uv-manager.ps1
-
-# With custom installation directory
-.\install-uv-manager.ps1 -InstallDir "C:\MyTools\uv-manager"
+irm https://raw.githubusercontent.com/superchargez/power_shelling/main/install-uv-manager.ps1 | iex
 ```
-# macOS / Linux
+
+### **Linux / macOS (Bash or Zsh)**
 ```bash
-# One-line install
-curl -sSL https://raw.githubusercontent.com/superchargez/power_shelling/main/install-uv-manager.sh | bash
-
-# Or download and run
-curl -O https://raw.githubusercontent.com/superchargez/power_shelling/main/install-uv-manager.sh
-chmod +x install-uv-manager.sh
-./install-uv-manager.sh
+curl -sSL https://raw.githubusercontent.com/superchargez/power_shelling/main/setup-uv.sh | bash
 ```
-# Manual Setup
-```powershell
-# Clone repository
-git clone https://github.com/superchargez/power_shelling.git
-cd power_shelling
 
-# Run installer
-.\install-uv-manager.ps1
+### **Windows (Legacy CMD)**
+```batch
+:: Download and run the .bat installer
+curl -O https://raw.githubusercontent.com/superchargez/power_shelling/main/install-uv-manager.bat
+install-uv-manager.bat
 ```
-# 🚀 Quick Start
+
+---
+
+## 🚀 Quick Start
+
 ```powershell
-# 1. List all environments
+# 1. Create a new environment named 'ai' with Python 3.11
+uvc ai 3.11
+
+# 2. Activate it from anywhere
+uva ai
+
+# 3. Install packages (blazing fast)
+uv pip install torch numpy
+
+# 4. List all your environments
 uvl
 
-# 2. Create a new environment
-uvc myproject -Python 3.12
-
-# 3. Activate it
-uva myproject
-
-# 4. Install packages (using UV's blazing speed)
-uv pip install pandas numpy matplotlib
-
-# 5. Deactivate when done
+# 5. Deactivate when finished
 uvx
 ```
-# 📚 Command Reference
-# Basic Commands
-Command	Alias	Description
-uv-env-list	uvl	List all available environments
-uv-env-create	uvc	Create a new environment
-uv-env-activate	uva	Activate an environment
-deactivate	uvx	Deactivate current environment
-uv-env-remove	uvr	Remove an environment
-uv-env-info	uvi	Show detailed environment info
 
-# Advanced Commands
-Command	Description
-uv-env-clone	Clone an existing environment
-uv-env-export	Export packages to requirements.txt
-uv-env-update	Update all packages in environment
-uv-env-template	Create environment from template
-uv-env-cleanup	Clean UV cache and temporary files
+---
 
-# 🎯 Environment Templates
-```powershell
-# Data Science environment
-uv-env-template data-science -Name ds
+## 📚 Command Reference
 
-# Machine Learning environment
-uv-env-template ml -Name torch-env
+| Alias | Full Command | Description |
+| :--- | :--- | :--- |
+| `uvl` | `Get-UvEnvList` | List all environments (Use `uvl -Prune` to clean up missing folders) |
+| `uvc` | `New-UvEnv` | Create: `uvc <name> <python_version>` |
+| `uva` | `Enter-UvEnv` | Activate an environment by name |
+| `uvx` | `Exit-UvEnv` | Deactivate the current environment |
+| `uvr` | `Remove-UvEnv` | Delete an environment and its physical files |
+| `uvu` | `Update-UvEnv` | Automatically upgrade all packages in the environment |
+| `uve` | `Export-UvEnv` | Export environment to `requirements.txt` |
+| `uvk` | `Clear-UvCache` | Wipe the global UV cache to free up space |
 
-# Web Development environment
-uv-env-template web-dev -Name api-server
+---
 
-# Minimal environment
-uv-env-template minimal -Name clean
+## ⚙️ How It Works
+
+### File Structure
+The manager organizes itself in your user profile:
+- **Windows**: `$HOME\.uv\envs\`
+- **Unix**: `~/.uv/envs/`
+
+```text
+.uv/envs/
+├── envs.json          # The central registry database
+├── project-a/         # Virtual environment 1
+└── project-b/         # Virtual environment 2
 ```
 
-# 🗂️ Project Integration
-# Auto-Activation
-Create a `.venv` file in your project root with the environment name:
-
-```bash
-# .venv file content
-myproject-env
-```
-The environment will auto-activate when you cd into the directory!
-
-# Project Structure
-
-text
-my-project/
-├── .venv              # Auto-activation file
-├── src/
-├── tests/
-└── pyproject.toml    # Project dependencies
-
-# 🔄 Update & Maintenance
-```powershell
-# Update UV Manager
-& "$env:USERPROFILE\.uv-manager\update-uv-manager.ps1"
-
-# Or if you used custom install directory
-& "C:\MyTools\uv-manager\update-uv-manager.ps1"
-
-# Uninstall (if needed)
-& "$env:USERPROFILE\.uv-manager\uninstall-uv-manager.ps1"
-```
-
-# ⚙️ Configuration
-# Custom Installation Directory
-```powershell
-# During installation
-.\install-uv-manager.ps1 -InstallDir "D:\Tools\UVManager"
-
-# Update registry manually
-Set-ItemProperty -Path "HKCU:\Software\UVManager" -Name "InstallDir" -Value "D:\Tools\UVManager"
-```
-Environment Variables
-powershell
-# Custom UV cache location
-$env:UV_CACHE_DIR = "D:\Cache\UV"
-
-# Custom environment root
-$global:UV_ENVS_ROOT = "D:\Environments"
-🐛 Troubleshooting
-Common Issues
-"UV not found" error
-
-powershell
-# Install UV manually
-pip install uv
-# Or
-pipx install uv
-Activation doesn't persist
-
-powershell
-# Ensure you're using the correct command
-uva env-name  # NOT: .\env-name\Scripts\Activate
-Permission errors
-
-powershell
-# Run PowerShell as administrator
-Start-Process PowerShell -Verb RunAs
-Script execution blocked
-
-powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-Debug Mode
-powershell
-# Run installer with debug output
-.\install-uv-manager.ps1 -Force -Verbose
-
-# Check installation logs
-Get-Content "$env:TEMP\uv-manager-install.log"
-🔗 Integration with Other Tools
-VS Code Integration
-Add to .vscode/settings.json:
-
-json
+### Registry Example (`envs.json`)
+Your environments are tracked so you don't have to remember where they are:
+```json
 {
-    "python.defaultInterpreterPath": "${env:HOME}/.uv/envs/myproject/Scripts/python.exe",
-    "terminal.integrated.shellArgs.windows": ["-NoExit", "-Command", "uva myproject"]
+  "data-science": {
+    "path": "C:\\Users\\You\\.uv\\envs\\data-science",
+    "python": "3.14",
+    "created": "2026-01-27T10:00:00"
+  }
 }
-PyCharm Integration
-Open Project Settings → Python Interpreter
-
-Add New Interpreter → System Interpreter
-
-Navigate to: ~/.uv/envs/myproject/Scripts/python.exe
-
-GitHub Actions
-yaml
-- name: Setup UV Environment
-  run: |
-    curl -sSL https://raw.githubusercontent.com/superchargez/power_shelling/main/install-uv-manager.sh | bash
-    uvc ci-env 3.11
-    uva ci-env
-    uv pip install -r requirements.txt
-📊 Benchmarks
-Operation	UV Manager	Conda	Virtualenv
-Create env	⚡ 0.8s	3.2s	2.1s
-Install pandas	⚡ 2.1s	15.3s	8.7s
-Activate	⚡ 0.02s	0.3s	0.1s
-Update all	⚡ 4.3s	22.1s	12.8s
-🤝 Contributing
-We welcome contributions! Here`'s how:
-
-Fork the repository
-
-Create a feature branch (git checkout -b feature/AmazingFeature)
-
-Commit your changes (git commit -m 'Add AmazingFeature')
-
-Push to the branch (git push origin feature/AmazingFeature)
-
-Open a Pull Request
-
-Development Setup
-bash
-# Clone and install development dependencies
-git clone https://github.com/superchargez/power_shelling.git
-cd power_shelling
-.\install-uv-manager.ps1 -NoProfile
-📄 License
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-🙏 Acknowledgments
-UV by Astral - Blazing-fast Python package manager
-
-Conda/Mamba - Inspiration for environment management patterns
-
-PowerShell Team - For the amazing scripting platform
-
-🌟 Support
-If you find this project useful, please:
-
-⭐ Star the repository
-
-🐛 Report issues
-
-💡 Suggest features
-
-🔄 Share with colleagues
-
-Made with ⚡ by superchargez
-
-"Stop managing environments, start coding."
-
-text
-## Additional Files You Should Create:
-
-### `CONTRIBUTING.md`
-```markdown
-# Contributing to UV Environment Manager
-
-## Development Workflow
-1. Fork the repository
-2. Create a feature branch
-3. Test your changes
-4. Submit a pull request
-
-## Testing Guidelines
-```bash
-# Test on Windows
-pwsh -File test-installer.ps1
-
-# Test on Linux
-bash test-installer.sh
-Code Style
-Use PowerShell 7+ features
-
-Follow PowerShell best practices
-
-Add help comments to all functions
-
-Include error handling
-
-text
-### `.github/ISSUE_TEMPLATE/bug_report.md`
-```markdown
----
-name: Bug Report
-about: Report a bug or unexpected behavior
-title: '[BUG] '
-labels: bug
-assignees: ''
+```
 
 ---
 
-**Describe the bug**
-A clear description of what the bug is.
+## 🛠️ Advanced Usage
 
-**To Reproduce**
-Steps to reproduce:
-1. Run command '...'
-2. See error '...'
+### **Bulk Package Updates**
+Instead of manually updating packages, run `uvu` while an environment is active. It scans for outdated versions and upgrades them using `uv pip install --upgrade`.
 
-**Expected behavior**
-What you expected to happen.
+### **Environment Maintenance**
+If you manually delete an environment folder, your registry will show it as `[MISSING]`. Run:
+```powershell
+uvl -Prune
+```
+This will automatically clean up the `envs.json` file.
 
-**Screenshots**
-If applicable, add screenshots.
+### **Shell Integration**
+The installers automatically inject the manager into your profile:
+- **PowerShell**: Adds to `$PROFILE`
+- **Bash**: Adds to `~/.bashrc`
+- **Zsh**: Adds to `~/.zshrc`
+- **CMD**: Uses the `AutoRun` registry key for instant availability.
 
-**Environment:**
- - OS: [e.g. Windows 11, Ubuntu 22.04]
- - PowerShell Version: [e.g. 7.4.0]
- - UV Version: [e.g. 0.2.10]
+---
 
-**Additional context**
-Add any other context about the problem.
+## 🤝 Contributing
+
+1. Fork the repository.
+2. Create a feature branch: `git checkout -b feature/AmazingFeature`.
+3. Commit your changes: `git commit -m 'Add AmazingFeature'`.
+4. Push to the branch: `git push origin feature/AmazingFeature`.
+5. Open a Pull Request.
+
+---
+
+## 📄 License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+**Made with ⚡ by [superchargez](https://github.com/superchargez)**  
+*"Stop managing environments, start coding."*
