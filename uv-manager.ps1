@@ -112,7 +112,7 @@ function uv-env-create {
     #>
     param(
         [Parameter(Mandatory=$true, Position=0)] [string]$Name,
-        [Parameter(Position=1)] [string]$Python = "3.12",
+        [Parameter(Position=1)] [string]$Python = "default",
         [string]$Path
     )
     
