@@ -79,6 +79,12 @@ uvc() { # New-UvEnv
     if [ $? -eq 0 ]; then
         local created_at=$(date +%Y-%m-%dT%H:%M:%S)
         local tmp=$(mktemp)
+        
+        # Create JSON file if it doesn't exist
+        if [ ! -f "$UV_ENVS_FILE" ]; then
+            echo "{}" > "$UV_ENVS_FILE"
+        fi
+        
         jq --arg name "$name" --arg path "$target_path" --arg py "$python" --arg date "$created_at" \
            '. + {($name): {path: $path, python: $py, created: $date}}' "$UV_ENVS_FILE" > "$tmp" && mv "$tmp" "$UV_ENVS_FILE"
         echo -e "\033[0;32mCreated. Activate with: uva $name\033[0m"
