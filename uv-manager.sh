@@ -11,6 +11,12 @@ export UV_ENVS_FILE="$UV_ENVS_ROOT/envs.json"
 mkdir -p "$UV_ENVS_ROOT"
 
 # 2. INTERNAL HELPERS
+_uv_ensure_json() {
+    if [ ! -f "$UV_ENVS_FILE" ]; then
+        echo "{}" > "$UV_ENVS_FILE"
+    fi
+}
+
 _uv_check_jq() {
     if ! command -v jq &> /dev/null; then
         echo -e "\033[0;31mError: 'jq' is not installed.\033[0m Please install it to use UV Manager (e.g., sudo apt install jq or brew install jq)."
